@@ -1,0 +1,61 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "path": "render-request",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "modelId": "gemini-1.5-flash",
+        "prompt": "=Crie um render realista para este ambiente: {{ $json.environment_name }}. \nDados tcnicos: Cores: {{ $json.mdf_color }}, Ferragens: {{ $json.hinge_type }}.\nMantenha a estrutura desta imagem original.",
+        "options": {}
+      },
+      "name": "AI Studio (Nano Banana)",
+      "type": "n8n-nodes-base.googleAiStudio",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "design",
+        "operation": "autofill",
+        "designId": "YOUR_CANVA_TEMPLATE_ID",
+        "data": "={{ $json.render_data }}"
+      },
+      "name": "Canva API",
+      "type": "n8n-nodes-base.canva",
+      "typeVersion": 1,
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Studio (Nano Banana)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Studio (Nano Banana)": {
+      "main": [
+        [
+          {
+            "node": "Canva API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
