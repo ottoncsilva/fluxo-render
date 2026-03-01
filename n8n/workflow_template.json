@@ -1,61 +1,206 @@
 {
+  "name": "Fluxo Render - Pipeline Completo",
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
         "path": "render-request",
-        "options": {}
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
+      "id": "node-webhook",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [250, 300]
+      "typeVersion": 2,
+      "position": [0, 300]
     },
     {
       "parameters": {
-        "modelId": "gemini-1.5-flash",
-        "prompt": "=Crie um render realista para este ambiente: {{ $json.environment_name }}. \nDados tcnicos: Cores: {{ $json.mdf_color }}, Ferragens: {{ $json.hinge_type }}.\nMantenha a estrutura desta imagem original.",
+        "modelId": {
+          "__rl": true,
+          "value": "gemini-2.0-flash-exp",
+          "mode": "list",
+          "cachedResultName": "Gemini 2.0 Flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Você é um especialista em design de interiores e fotografia de arquitetura. Crie um prompt de renderização fotorrealista detalhado para o seguinte ambiente:\n\n**Ambiente:** {{ $json.body.environment }}\n**Estilo Visual:** {{ $json.body.style }}\n**Cor do MDF:** {{ $json.body.mdfColor }}\n**Dobradiça:** {{ $json.body.hingeType }}\n**Corrediça:** {{ $json.body.slideType }}\n**Espessura MDF:** {{ $json.body.thickness }}\n\nO prompt deve:\n1. Manter a estrutura exata dos móveis da imagem de referência\n2. Substituir os materiais 3D sintéticos por materiais fotorrealistas\n3. Incluir iluminação natural e artificial coerente\n4. Especificar texturas detalhadas para o MDF {{ $json.body.mdfColor }}\n5. Ter no máximo 200 palavras\n\nResponda APENAS com o prompt de renderização, sem introduções.",
+              "role": "user"
+            }
+          ]
+        },
         "options": {}
       },
-      "name": "AI Studio (Nano Banana)",
-      "type": "n8n-nodes-base.googleAiStudio",
+      "id": "node-prompt-master",
+      "name": "Gerar Prompt Master",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [240, 300]
     },
     {
       "parameters": {
-        "resource": "design",
-        "operation": "autofill",
-        "designId": "YOUR_CANVA_TEMPLATE_ID",
-        "data": "={{ $json.render_data }}"
+        "fieldToSplitOut": "body.images",
+        "options": {}
       },
-      "name": "Canva API",
-      "type": "n8n-nodes-base.canva",
+      "id": "node-split",
+      "name": "Loop sobre Imagens",
+      "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [650, 300]
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gemini-2.0-flash-exp",
+          "mode": "list",
+          "cachedResultName": "Gemini 2.0 Flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $('Gerar Prompt Master').item.json.content }}\n\nMantenha RIGOROSAMENTE a posição e proporção de todos os móveis, armários e elementos arquitetônicos visíveis na imagem de referência. Transforme os materiais em fotorrealistas. Estilo: {{ $('Webhook Trigger').item.json.body.style }}. Renderização 8K, fotorrealismo extremo.",
+              "role": "user"
+            },
+            {
+              "content": "={{ $json.data }}",
+              "role": "user",
+              "binaryData": true,
+              "mimeType": "={{ $json.mimeType }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-render-image",
+      "name": "Render com Gemini (img2img)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "node-merge",
+      "name": "Consolidar Renders",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara o payload de saída com todos os renders e dados técnicos\nconst webhookData = $('Webhook Trigger').first().json.body;\nconst renders = $input.all().map((item, index) => ({\n  index,\n  description: item.json.content || 'Render processado',\n  imageName: webhookData.images?.[index]?.name || `render_${index + 1}.jpg`\n}));\n\nconst copyTecnico = `✨ ${webhookData.environment}\n\n📐 Especificações Técnicas:\n• MDF: ${webhookData.mdfColor} — ${webhookData.thickness}\n• Dobradiças: ${webhookData.hingeType}\n• Corrediças: ${webhookData.slideType}\n\n🎨 Estilo: ${webhookData.style}`;\n\nreturn [{\n  json: {\n    environment: webhookData.environment,\n    style: webhookData.style,\n    renders,\n    copyTecnico,\n    totalImages: renders.length,\n    processedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-prepare",
+      "name": "Preparar Dados para Canva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.canva.com/rest/v1/autofills",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "canvaApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "brand_template_id": "COLE_SEU_TEMPLATE_ID_AQUI",
+          "title": "={{ $json.environment }} — Fluxo Render",
+          "data": {
+            "titulo_ambiente": {
+              "type": "text",
+              "text": "={{ $json.environment }}"
+            },
+            "descricao_estilo": {
+              "type": "text",
+              "text": "={{ $json.style }}"
+            },
+            "copy_tecnico": {
+              "type": "text",
+              "text": "={{ $json.copyTecnico }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "node-canva",
+      "name": "Canva Autofill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"environment\": \"{{ $('Preparar Dados para Canva').item.json.environment }}\",\n  \"totalImages\": {{ $('Preparar Dados para Canva').item.json.totalImages }},\n  \"canva_link\": \"{{ $json.job?.result?.design?.url || $json.urls?.edit_url || '' }}\",\n  \"processedAt\": \"{{ $('Preparar Dados para Canva').item.json.processedAt }}\"\n}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-respond",
+      "name": "Responder ao Frontend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1680, 300]
     }
   ],
   "connections": {
     "Webhook Trigger": {
-      "main": [
-        [
-          {
-            "node": "AI Studio (Nano Banana)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Gerar Prompt Master", "type": "main", "index": 0 }]]
     },
-    "AI Studio (Nano Banana)": {
-      "main": [
-        [
-          {
-            "node": "Canva API",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Gerar Prompt Master": {
+      "main": [[{ "node": "Loop sobre Imagens", "type": "main", "index": 0 }]]
+    },
+    "Loop sobre Imagens": {
+      "main": [[{ "node": "Render com Gemini (img2img)", "type": "main", "index": 0 }]]
+    },
+    "Render com Gemini (img2img)": {
+      "main": [[{ "node": "Consolidar Renders", "type": "main", "index": 0 }]]
+    },
+    "Consolidar Renders": {
+      "main": [[{ "node": "Preparar Dados para Canva", "type": "main", "index": 0 }]]
+    },
+    "Preparar Dados para Canva": {
+      "main": [[{ "node": "Canva Autofill", "type": "main", "index": 0 }]]
+    },
+    "Canva Autofill": {
+      "main": [[{ "node": "Responder ao Frontend", "type": "main", "index": 0 }]]
     }
-  }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["fluxo-render"],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-01T00:00:00.000Z",
+  "versionId": "1"
 }
